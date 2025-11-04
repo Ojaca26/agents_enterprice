@@ -12,11 +12,10 @@ from sqlalchemy import text
 from typing import Optional
 
 # LangChain + Gemini
-from langchain_google_genai import ChatGoogleGenerativeAI # Usaremos esta
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.agent_toolkits.sql.base import create_sql_agent
 from langchain_community.utilities import SQLDatabase
-# ❗️ LÍNEA DE "langchain_experimental" ELIMINADA ❗️
 import numpy as np
 
 # Micrófono en vivo (frontend) + fallback SR
@@ -70,10 +69,14 @@ def get_llms():
         try:
             api_key = st.secrets["google_api_key"]
             common_config = dict(temperature=0.1, google_api_key=api_key)
-            llm_sql = ChatGoogleGenerativeAI(model="gemini-1.5-pro", **common_config)
-            llm_analista = ChatGoogleGenerativeAI(model="gemini-1.5-pro", **common_config)
-            llm_orq = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.0, google_api_key=api_key)
-            llm_validador = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.0, google_api_key=api_key)
+            
+            # --- ⬇️ INICIO DE LA CORRECCIÓN ⬇️ ---
+            # Cambiamos "gemini-1.5-pro" por "gemini-pro" (el estable)
+            llm_sql = ChatGoogleGenerativeAI(model="gemini-pro", **common_config)
+            llm_analista = ChatGoogleGenerativeAI(model="gemini-pro", **common_config)
+            llm_orq = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.0, google_api_key=api_key)
+            llm_validador = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.0, google_api_key=api_key)
+            # --- ⬆️ FIN DE LA CORRECCIÓN ⬆️ ---
             
             st.success("✅ Agentes de IANA listos.")
             return llm_sql, llm_analista, llm_orq, llm_validador
@@ -101,13 +104,11 @@ def get_sql_agent(_llm, _db):
         st.success("✅ Agente SQL de respaldo configurado.")
         return agent
 
-# Este es el agente LENTO que solo se usa si el rápido falla
 agente_sql_plan_b = get_sql_agent(llm_sql, db)
 
 # ============================================
 # 1.b) Reconocedor de Voz (fallback local)
 # ============================================
-
 @st.cache_resource
 def get_recognizer():
     r = sr.Recognizer()
@@ -137,12 +138,10 @@ def extraer_detalles_correo(pregunta_usuario: str) -> dict:
     Tu tarea es analizar la pregunta de un usuario y extraer los detalles para enviar un correo. Tu output DEBE SER un JSON válido.
     Agenda de Contactos Disponibles: {', '.join(contactos.keys())}
     Pregunta del usuario: "{pregunta_usuario}"
-
     Instrucciones para extraer:
     1.  `recipient_name`: Busca un nombre de la "Agenda de Contactos". Si no, usa "default".
     2.  `subject`: Crea un asunto corto.
     3.  `body`: Crea un cuerpo de texto breve.
-
     JSON Output para la pregunta actual:
     """
     try:
@@ -170,7 +169,6 @@ def extraer_detalles_correo(pregunta_usuario: str) -> dict:
             "subject": "Reporte de Datos - IANA",
             "body": "Adjunto encontrarás los datos solicitados."
         }
-
 
 def enviar_correo_agente(recipient: str, subject: str, body: str, df: Optional[pd.DataFrame] = None):
     with st.spinner(f"📧 Enviando correo a {recipient}..."):
@@ -539,17 +537,14 @@ Clasificación:
 
 def obtener_datos_sql(pregunta_usuario: str, hist_text: str, last_sql: Optional[str] = None) -> dict:
     
-    # --- PLAN A: MÉTODO RÁPIDO (Text-to-SQL) ---
     res_real = ejecutar_sql_real(pregunta_usuario, hist_text, last_sql)
     
     if res_real.get("df") is not None and not res_real["df"].empty:
-        return res_real # ¡Éxito con el Plan A!
+        return res_real
     elif res_real.get("df") is not None and res_real["df"].empty:
-        # El Plan A funcionó pero no devolvió datos, es una respuesta válida.
         res_real["texto"] = "La consulta se ejecutó, pero no se encontraron resultados."
         return res_real
         
-    # --- PLAN B: MÉTODO LENTO (Agente) ---
     st.warning("La consulta directa (Plan A) falló. Intentando con el agente de lenguaje natural (Plan B)...")
     return ejecutar_sql_en_lenguaje_natural(pregunta_usuario, hist_text)
 
@@ -685,55 +680,3 @@ for message in st.session_state.messages:
         content = message.get("content", {});
         if isinstance(content, dict):
             if content.get("texto"): st.markdown(content["texto"])
-            if content.get("styled") is not None: st.dataframe(content["styled"])
-            elif isinstance(content.get("df"), pd.DataFrame) and not content["df"].empty:
-                styled_df = style_dataframe(content["df"])
-                st.dataframe(styled_df)
-            if content.get("analisis"): st.markdown(content["analisis"])
-        elif isinstance(content, str): st.markdown(content)
-
-st.markdown("### 🎤 Habla con IANA o escribe tu pregunta")
-lang = st.secrets.get("stt_language", "es-CO")
-
-def procesar_pregunta(prompt):
-    if prompt:
-        # Hacemos la comprobación de conexión *aquí*
-        if not all([db, llm_sql, llm_analista, llm_orq, agente_sql_plan_b, llm_validador]):
-            st.error("La aplicación no está completamente inicializada. Revisa los errores de conexión o de API key en los 'Secrets' de Streamlit.")
-            return
-
-        st.session_state.messages.append({"role": "user", "content": {"texto": prompt}})
-        with st.chat_message("user"): st.markdown(prompt)
-        with st.chat_message("assistant"):
-            res = orquestador(prompt, st.session_state.messages)
-            st.session_state.messages.append({"role": "assistant", "content": res})
-
-        if res and res.get("tipo") != "error":
-            if res.get("texto"): st.markdown(res["texto"])
-            if res.get("styled") is not None:
-                st.dataframe(res["styled"])
-            elif isinstance(res.get("df"), pd.DataFrame) and not res["df"].empty:
-                st.dataframe(res["df"])
-            if res.get("analisis"):
-                st.markdown("---"); st.markdown("### 🧠 Análisis de IANA"); st.markdown(res["analisis"])
-                st.toast("Análisis generado ✅", icon="✅")
-        elif res:
-            st.error(res.get("texto", "Ocurrió un error inesperado."))
-            st.toast("Hubo un error ❌", icon="❌")
-
-input_container = st.container()
-with input_container:
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        voice_text = speech_to_text(language=lang, start_prompt="🎙️ Hablar", stop_prompt="🛑 Detener", use_container_width=True, just_once=True, key="stt")
-    with col2:
-        prompt_text = st.chat_input("... o escribe tu pregunta aquí")
-
-prompt_a_procesar = None
-if voice_text:
-    prompt_a_procesar = voice_text
-elif prompt_text:
-    prompt_a_procesar = prompt_text
-
-if prompt_a_procesar:
-    procesar_pregunta(prompt_a_procesar)
