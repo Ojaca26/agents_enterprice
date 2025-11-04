@@ -12,12 +12,11 @@ from sqlalchemy import text
 from typing import Optional
 
 # LangChain + Gemini
-# --- ¡CAMBIO IMPORTANTE! ---
 from langchain_google_genai import ChatGoogleGenerativeAI # Usaremos esta
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.agent_toolkits.sql.base import create_sql_agent
 from langchain_community.utilities import SQLDatabase
-#from langchain_experimental.sql import SQLDatabaseChain # Esta es la rápida
+# ❗️ LÍNEA DE "langchain_experimental" ELIMINADA ❗️
 import numpy as np
 
 # Micrófono en vivo (frontend) + fallback SR
@@ -48,41 +47,27 @@ with col2:
 # ============================================
 @st.cache_resource
 def get_database_connection():
-    """
-    Esta función se conecta a la base de datos usando los secretos de Streamlit.
-    """
     with st.spinner("🛰️ Conectando a la base de datos..."):
         try:
             creds = st.secrets["db_credentials"]
-            
-            # 1. URI LIMPIA
             uri = f"mysql+pymysql://{creds['user']}:{creds['password']}@{creds['host']}/{creds['database']}"
             
-            # 2. ENGINE_ARGS:
             engine_args = {
-                # "connect_args": {"ssl_disabled": True}, # Descomenta si tu BD no usa SSL
                 "pool_recycle": 1800 
             }
-
-            # Importante: Quita include_tables=["autollantas"] para que vea TODA tu base de datos
             db = SQLDatabase.from_uri(uri, engine_args=engine_args)
-            
-            # Prueba la conexión
             db.run("SELECT 1")
-
             st.success("✅ Conexión a la base de datos establecida.")
             return db
         except Exception as e:
             st.error(f"Error al conectar a la base de datos: {e}")
+            st.error("REVISA TUS SECRETS: 'db_credentials' deben estar correctos Y tu firewall debe permitir IPs de Streamlit Cloud.")
             return None
 
 @st.cache_resource
 def get_llms():
     with st.spinner("🤝 Inicializando la red de agentes IANA..."):
         try:
-            # --- ⬇️ INICIO DE LA MODIFICACIÓN ⬇️ ---
-            # Activamos los modelos de Google
-            
             api_key = st.secrets["google_api_key"]
             common_config = dict(temperature=0.1, google_api_key=api_key)
             llm_sql = ChatGoogleGenerativeAI(model="gemini-1.5-pro", **common_config)
@@ -90,12 +75,10 @@ def get_llms():
             llm_orq = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.0, google_api_key=api_key)
             llm_validador = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.0, google_api_key=api_key)
             
-            # --- ⬆️ FIN DE LA MODIFICACIÓN ⬆️ ---
-            
             st.success("✅ Agentes de IANA listos.")
             return llm_sql, llm_analista, llm_orq, llm_validador
         except Exception as e:
-            st.error(f"Error al inicializar los LLMs. Revisa tu API key de Google. Detalle: {e}")
+            st.error(f"Error al inicializar los LLMs. Revisa tu API key de Google ('google_api_key'). Detalle: {e}")
             return None, None, None, None
 
 db = get_database_connection()
@@ -108,7 +91,6 @@ def get_sql_agent(_llm, _db):
     if not _llm or not _db: return None
     with st.spinner("🛠️ Configurando agente SQL de respaldo..."):
         toolkit = SQLDatabaseToolkit(db=_db, llm=_llm)
-        
         agent = create_sql_agent(
             llm=_llm, 
             toolkit=toolkit, 
@@ -116,7 +98,6 @@ def get_sql_agent(_llm, _db):
             top_k=1000,
             handle_parsing_errors=True 
         )
-        
         st.success("✅ Agente SQL de respaldo configurado.")
         return agent
 
@@ -147,7 +128,6 @@ def transcribir_audio_bytes(data_bytes: bytes, language: str) -> Optional[str]:
 # ============================================
 # 2) Agente de Correo (Lógica Mejorada)
 # ============================================
-# (Esta sección no necesita cambios, la dejamos tal cual)
 def extraer_detalles_correo(pregunta_usuario: str) -> dict:
     st.info("🧠 El agente de correo está interpretando tu solicitud...")
     contactos = dict(st.secrets.get("named_recipients", {}))
@@ -226,7 +206,6 @@ def enviar_correo_agente(recipient: str, subject: str, body: str, df: Optional[p
 # ============================================
 # 3) Funciones Auxiliares y Agentes
 # ============================================
-# (Todas las funciones desde _coerce_numeric_series hasta limpiar_sql se mantienen)
 def _coerce_numeric_series(s: pd.Series) -> pd.Series:
     s2 = s.astype(str).str.replace(r'[\u00A0\s]', '', regex=True).str.replace(',', '', regex=False).str.replace('$', '', regex=False).str.replace('%', '', regex=False)
     try: return pd.to_numeric(s2)
@@ -246,7 +225,6 @@ def get_history_text(chat_history: list, n_turns=3) -> str:
     return "\n--- Contexto de Conversación Anterior ---\n" + "\n".join(history_text) + "\n--- Fin del Contexto ---\n"
 
 def get_last_sql_from_history(chat_history: list) -> Optional[str]:
-    """Extrae la última consulta SQL exitosa del historial."""
     st.info("Buscando la última consulta SQL en el historial...")
     for msg in reversed(chat_history):
         if msg.get("role") == "assistant":
@@ -288,7 +266,6 @@ def _asegurar_select_only(sql: str) -> str:
     return sql_clean
 
 def style_dataframe(df: pd.DataFrame):
-    """Aplica el formato de miles y resalta la fila Total a un DataFrame."""
     value_cols = [
         c for c in df.select_dtypes("number").columns
         if not re.search(r"(?i)\b(mes|año|dia|fecha)\b", c)
@@ -318,9 +295,7 @@ def limpiar_sql(sql_texto: str) -> str:
 def ejecutar_sql_real(pregunta_usuario: str, hist_text: str, last_sql: Optional[str] = None):
     st.info("🤖 El agente de datos (Plan A: Rápido) está traduciendo tu pregunta a SQL...")
 
-    # --- Obtener Esquema ---
     try:
-        # Obtenemos el esquema de TODAS las tablas que IANA puede ver
         schema_info = db.get_table_info() 
     except Exception as e:
         st.error(f"Error crítico: No se pudo obtener el esquema de la base de datos. {e}")
@@ -364,7 +339,6 @@ def ejecutar_sql_real(pregunta_usuario: str, hist_text: str, last_sql: Optional[
     """
 
     try:
-        # --- Llamada directa al LLM para generar SQL ---
         sql_query_bruta = llm_sql.invoke(prompt_con_instrucciones).content
         
         if not sql_query_bruta:
@@ -373,7 +347,6 @@ def ejecutar_sql_real(pregunta_usuario: str, hist_text: str, last_sql: Optional[
 
         st.text_area("🧩 SQL (Plan A) generado por el modelo:", sql_query_bruta, height=100)
 
-        # --- Limpieza del SQL ---
         sql_query_limpia = limpiar_sql(sql_query_bruta)
         sql_query_limpia = _asegurar_select_only(sql_query_limpia)
 
@@ -383,23 +356,18 @@ def ejecutar_sql_real(pregunta_usuario: str, hist_text: str, last_sql: Optional[
 
         st.code(sql_query_limpia, language="sql")
 
-        # --- Ejecución del SQL ---
         with st.spinner("⏳ Ejecutando consulta..."):
             with db._engine.connect() as conn:
                 df = pd.read_sql(text(sql_query_limpia), conn)
 
         st.success(f"✅ ¡Consulta ejecutada! Filas: {len(df)}")
 
-        # --- Post-procesamiento (Simplificado) ---
         try:
             if not df.empty:
-                # Identificar columnas de valor numérico
                 value_cols = [
                     c for c in df.select_dtypes("number").columns
                     if not re.search(r"(?i)\b(mes|año|dia|fecha|id|codigo)\b", c)
                 ]
-
-                # Añadir fila de Total
                 if value_cols and len(df) > 1:
                     total_row = {}
                     for col in df.columns:
@@ -410,16 +378,14 @@ def ejecutar_sql_real(pregunta_usuario: str, hist_text: str, last_sql: Optional[
                         elif pd.api.types.is_numeric_dtype(df[col]):
                             total_row[col] = np.nan
                         else: total_row[col] = ""
-                    
                     first_col_name = df.columns[0]
                     total_row[first_col_name] = "Total"
                     df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
-                # Aplicar Estilos
                 styled_df = style_dataframe(df)
                 return {"sql": sql_query_limpia, "df": df, "styled": styled_df}
             else:
-                return {"sql": sql_query_limpia, "df": df} # Retorna DF vacío
+                return {"sql": sql_query_limpia, "df": df}
 
         except Exception as e:
             st.warning(f"⚠️ No se pudo aplicar formato ni totales: {e}")
@@ -430,7 +396,7 @@ def ejecutar_sql_real(pregunta_usuario: str, hist_text: str, last_sql: Optional[
         return {"sql": None, "df": None, "error": str(e)}
 
 # ---
-# ❗️ AGENTE SQL LENTO (PLAN B) - Lógica de 'LangGraph'
+# ❗️ AGENTE SQL LENTO (PLAN B)
 # ---
 def ejecutar_sql_en_lenguaje_natural(pregunta_usuario: str, hist_text: str):
     st.info("🤔 Activando el agente SQL experto (Plan B: Lento)...")
@@ -440,10 +406,8 @@ def ejecutar_sql_en_lenguaje_natural(pregunta_usuario: str, hist_text: str):
     Usando las herramientas de base de datos disponibles, responde la siguiente pregunta del usuario.
     Pregunta: "{pregunta_usuario}"
     """
-
     try:
         with st.spinner("💬 Pidiendo al agente SQL (Plan B) que responda..."):
-            # Usamos el agente_sql_plan_b que definimos al inicio
             res = agente_sql_plan_b.invoke(simple_prompt)
             texto_salida = res["output"] if isinstance(res, dict) and "output" in res else str(res)
         
@@ -464,7 +428,6 @@ def ejecutar_sql_en_lenguaje_natural(pregunta_usuario: str, hist_text: str):
     
 def analizar_con_datos(pregunta_usuario: str, hist_text: str, df: pd.DataFrame | None, feedback: str = None):
     st.info("\n🧠 El analista experto está examinando los datos...")
-    # (El resto de esta función es idéntico al de autollantas, no se toca)
     correccion_prompt = ""
     if feedback:
         st.warning(f"⚠️ Reintentando con feedback: {feedback}")
@@ -516,7 +479,6 @@ def generar_resumen_tabla(pregunta_usuario: str, res: dict) -> dict:
 # 4) Orquestador y Validación
 # ============================================
 def validar_y_corregir_respuesta_analista(pregunta_usuario: str, res_analisis: dict, hist_text: str) -> dict:
-    # (Idéntico a Autollantas, no se toca)
     MAX_INTENTOS = 2
     for intento in range(MAX_INTENTOS):
         st.info(f"🕵️‍♀️ Supervisor de Calidad: Verificando análisis (Intento {intento + 1})..."); contenido_respuesta = res_analisis.get("analisis", "") or ""
@@ -540,7 +502,6 @@ def validar_y_corregir_respuesta_analista(pregunta_usuario: str, res_analisis: d
 
 
 def clasificar_intencion(pregunta: str) -> str:
-    # (Idéntico a Autollantas, no se toca)
     prompt_orq = f"""
 Clasifica la intención del usuario en UNA SOLA PALABRA. Presta especial atención a los verbos de acción y palabras clave.
 
@@ -565,7 +526,6 @@ Clasificación:
         opciones = {"consulta", "analista", "conversacional", "correo"}
         r = llm_orq.invoke(prompt_orq).content.strip().lower().replace('"', '').replace("'", "")
         
-        # Refuerzo semántico
         if any(pal in pregunta.lower() for pal in [
             "venta", "ventas", "margen", "costo", "costos", "precio", "unidades",
             "rubro", "cliente", "artículo", "producto", "línea", "familia", "total", "facturado"
@@ -578,22 +538,22 @@ Clasificación:
         return "consulta"
 
 def obtener_datos_sql(pregunta_usuario: str, hist_text: str, last_sql: Optional[str] = None) -> dict:
-    """
-    Implementa la lógica de 2 agentes: Plan A (rápido) y Plan B (lento).
-    """
     
     # --- PLAN A: MÉTODO RÁPIDO (Text-to-SQL) ---
     res_real = ejecutar_sql_real(pregunta_usuario, hist_text, last_sql)
     
     if res_real.get("df") is not None and not res_real["df"].empty:
         return res_real # ¡Éxito con el Plan A!
+    elif res_real.get("df") is not None and res_real["df"].empty:
+        # El Plan A funcionó pero no devolvió datos, es una respuesta válida.
+        res_real["texto"] = "La consulta se ejecutó, pero no se encontraron resultados."
+        return res_real
         
     # --- PLAN B: MÉTODO LENTO (Agente) ---
-    st.warning("La consulta directa (Plan A) falló o no devolvió datos. Intentando con el agente de lenguaje natural (Plan B)...")
+    st.warning("La consulta directa (Plan A) falló. Intentando con el agente de lenguaje natural (Plan B)...")
     return ejecutar_sql_en_lenguaje_natural(pregunta_usuario, hist_text)
 
 def guardian_agent(pregunta_usuario: str, sql_propuesta: str | None = None) -> bool:
-    # (Idéntico a Autollantas, no se toca)
     st.info("🧩 Guardian Agent: verificando seguridad de la solicitud...")
     palabras_peligrosas = [
         "drop", "delete", "truncate", "update", "insert", "alter",
@@ -617,7 +577,7 @@ Reglas:
 2. Bloquea si intenta modificar datos con verbos peligrosos (eliminar, borrar, actualizar, insertar, modificar, crear, drop, alter).
 3. Bloquea si pide estructura interna del sistema o base de datos sensible.
 4. PERMITE expresamente solicitudes de análisis financiero (márgenes, ventas, costos, totales, promedios, cantidades, precios).
-5. **NUEVA REGLA:** PERMITE verbos analíticos comunes (ej. "agrega la columna mes", "agrupa por", "compara con", "incluye el cliente") ya que se refieren a la *presentación* de los datos (un SELECT), no a la *modificación* de la base de datos (un UPDATE/INSERT).
+5. PERMITE verbos analíticos comunes (ej. "agrega la columna mes", "agrupa por", "compara con") ya que se refieren a la *presentación* de los datos (un SELECT).
 
 Responde solo con una palabra:
 - "APROBADO" si es seguro.
@@ -636,12 +596,9 @@ Responde solo con una palabra:
     return True
 
 def orquestador(pregunta_usuario: str, chat_history: list):
-    # (Idéntico a Autollantas, no se toca)
-    with st.expander("⚙️ Ver Proceso de IANA", expanded=False):
+    with st.expander("⚙️ Ver Proceso de IANA", expanded=True):
         hist_text = get_history_text(chat_history)
-        
         last_sql = get_last_sql_from_history(chat_history)
-
         clasificacion = clasificar_intencion(pregunta_usuario)
         st.success(f"✅ ¡Intención detectada! Tarea: {clasificacion.upper()}.")
 
@@ -657,10 +614,8 @@ def orquestador(pregunta_usuario: str, chat_history: list):
                         df_para_enviar = df_prev
                         st.info("📧 Datos de la tabla anterior encontrados para adjuntar al correo.")
                         break
-            
             if df_para_enviar is None:
                 st.warning("No encontré una tabla en la conversación reciente para enviar. El correo irá sin datos adjuntos.")
-
             detalles = extraer_detalles_correo(pregunta_usuario)
             return enviar_correo_agente(
                 recipient=detalles["recipient"],
@@ -686,7 +641,6 @@ def orquestador(pregunta_usuario: str, chat_history: list):
         if df_previo is not None:
             prompt_lower = pregunta_usuario.lower()
             prompt_clean = prompt_lower.strip().rstrip("?.!")
-            
             contextual_keywords = ["anterior", "esos datos", "esa tabla", "la tabla"]
             simple_analysis_triggers = ["analiza", "analisis", "análisis", "haz un analisis", "dame un analisis"]
 
@@ -702,14 +656,14 @@ def orquestador(pregunta_usuario: str, chat_history: list):
             res_datos = obtener_datos_sql(pregunta_usuario, hist_text, last_sql)
         
 
-        if res_datos.get("df") is None or res_datos["df"].empty:
+        if res_datos.get("df") is None: # Permitir DF vacíos
             return {"tipo": "error", "texto": "Lo siento, no pude obtener datos para tu pregunta. Intenta reformularla."}
 
         if clasificacion == "consulta":
             st.success("✅ Consulta directa completada.")
             res_interpretado = interpretar_resultado_sql(res_datos)
             
-            if res_interpretado.get("texto") is None and res_interpretado.get("df") is not None and not res_interpretado["df"].empty:
+            if res_interpretado.get("texto") is None:
                 res_interpretado = generar_resumen_tabla(pregunta_usuario, res_interpretado)
             
             return res_interpretado
@@ -722,7 +676,6 @@ def orquestador(pregunta_usuario: str, chat_history: list):
 # ============================================
 # 5) Interfaz: Micrófono en vivo + Chat
 # ============================================
-# (Idéntico a Autollantas, no se toca)
 
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": {"texto": "¡Hola! Soy IANA, tu asistente de IA. ¿Qué te gustaría saber?"}}]
@@ -732,14 +685,11 @@ for message in st.session_state.messages:
         content = message.get("content", {});
         if isinstance(content, dict):
             if content.get("texto"): st.markdown(content["texto"])
-            
             if content.get("styled") is not None: st.dataframe(content["styled"])
             elif isinstance(content.get("df"), pd.DataFrame) and not content["df"].empty:
                 styled_df = style_dataframe(content["df"])
                 st.dataframe(styled_df)
-            
             if content.get("analisis"): st.markdown(content["analisis"])
-            
         elif isinstance(content, str): st.markdown(content)
 
 st.markdown("### 🎤 Habla con IANA o escribe tu pregunta")
@@ -747,8 +697,9 @@ lang = st.secrets.get("stt_language", "es-CO")
 
 def procesar_pregunta(prompt):
     if prompt:
+        # Hacemos la comprobación de conexión *aquí*
         if not all([db, llm_sql, llm_analista, llm_orq, agente_sql_plan_b, llm_validador]):
-            st.error("La aplicación no está completamente inicializada. Revisa los errores de conexión o de API key.")
+            st.error("La aplicación no está completamente inicializada. Revisa los errores de conexión o de API key en los 'Secrets' de Streamlit.")
             return
 
         st.session_state.messages.append({"role": "user", "content": {"texto": prompt}})
@@ -759,12 +710,10 @@ def procesar_pregunta(prompt):
 
         if res and res.get("tipo") != "error":
             if res.get("texto"): st.markdown(res["texto"])
-            
             if res.get("styled") is not None:
                 st.dataframe(res["styled"])
             elif isinstance(res.get("df"), pd.DataFrame) and not res["df"].empty:
                 st.dataframe(res["df"])
-            
             if res.get("analisis"):
                 st.markdown("---"); st.markdown("### 🧠 Análisis de IANA"); st.markdown(res["analisis"])
                 st.toast("Análisis generado ✅", icon="✅")
@@ -787,5 +736,4 @@ elif prompt_text:
     prompt_a_procesar = prompt_text
 
 if prompt_a_procesar:
-
     procesar_pregunta(prompt_a_procesar)
