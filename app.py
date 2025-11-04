@@ -32,9 +32,9 @@ from email.mime.application import MIMEApplication
 import json
 
 # ============================================
-# 0) NUEVO DICCIONARIO DE DATOS (¡LA CLAVE!)
+# 0) NUEVO DICCIONARIO DE DATOS (¡CORREGIDO!)
 # ============================================
-# Todo el texto que me pasaste, metido en una variable
+# Se añadió el prefijo 'replica_' a todas las tablas/vistas.
 DATA_DICTIONARY = """
 1. Visión General del Modelo
 El modelo de datos es un Modelo Estrella con múltiples tablas de hechos.
@@ -44,33 +44,33 @@ La IA debe unir (JOIN) las tablas de Hechos con las tablas de Dimensión usando 
 
 2. Diccionario de Vistas de Hechos (Las “Operativas”)
 
-VIEW_Fact_Ingresos (V11)
+replica_VIEW_Fact_Ingresos (V11)
 - Propósito: Contiene cada línea individual de ítem facturado.
 - Cuándo usarla (¡IMPORTANTE!): Usar SIEMPRE que el usuario pregunte por Ingresos, Ventas, Facturación o Valor de Venta.
 - Grano: Una fila por ID_SOLICITUD + ID_Concepto.
 - Columnas Clave:
-    - ID_SOLICITUD: Llave para unir con VIEW_Fact_Solicitudes.
-    - ID_Concepto: Llave para unir con VIEW_Dim_Concepto (Productos).
-    - ID_Empresa: Llave para unir con VIEW_Dim_Empresa (Clientes).
+    - ID_SOLICITUD: Llave para unir con replica_VIEW_Fact_Solicitudes.
+    - ID_Concepto: Llave para unir con replica_VIEW_Dim_Concepto (Productos).
+    - ID_Empresa: Llave para unir con replica_VIEW_Dim_Empresa (Clientes).
     - Valor_Facturado: LA MÉTRICA PRINCIPAL DE INGRESOS.
 
-VIEW_Fact_Costos (V5)
+replica_VIEW_Fact_Costos (V5)
 - Propósito: Contiene cada línea individual de costo de nómina.
 - Cuándo usarla (¡IMPORTANTE!): Usar SIEMPRE que el usuario pregunte por Costos, Gastos, Nómina o Costos Operativos.
 - Grano: Una fila por ID_SOLICITUD + ID_Usuario.
 - Columnas Clave:
-    - ID_SOLICITUD: Llave para unir con VIEW_Fact_Solicitudes.
-    - ID_Usuario: Llave para unir con VIEW_Dim_Usuario (Empleados).
+    - ID_SOLICITUD: Llave para unir con replica_VIEW_Fact_Solicitudes.
+    - ID_Usuario: Llave para unir con replica_VIEW_Dim_Usuario (Empleados).
     - Rol_Empleado: Etiqueta (‘Líder’ o ‘Auxiliar’).
     - Costo_Total_Nomina: LA MÉTRICA PRINCIPAL DE COSTOS. (Incluye recargos, cesantías, etc.)
 
-VIEW_Fact_Solicitudes (V9)
+replica_VIEW_Fact_Solicitudes (V9)
 - Propósito: Tabla operativa principal con una fila por cada orden (solicitud).
 - Cuándo usarla: Para medir rendimiento, tiempos y cumplimiento de metas.
 - Grano: Una fila por ID_SOLICITUD.
 - Columnas Clave:
     - ID_SOLICITUD: Llave primaria.
-    - ID_Empresa: Llave para unir con VIEW_Dim_Empresa.
+    - ID_Empresa: Llave para unir con replica_VIEW_Dim_Empresa.
     - Tiempo_Ejecucion_Minutos / Horas: Tiempo real de trabajo.
     - Meta_Ejecucion_Min / Horas: Meta oficial para ejecución.
     - Cumple_Meta_Ejecucion: Flag (1 o 0). Usar AVG() para obtener % de cumplimiento.
@@ -78,7 +78,7 @@ VIEW_Fact_Solicitudes (V9)
 3. Diccionario de Dimensiones “Inteligentes” (El “Contexto”)
 (NO SUMAR MÉTRICAS EN ESTAS VISTAS. SOLO USAR PARA FILTRAR Y AGRUPAR).
 
-VIEW_Dim_Empresa (V3)
+replica_VIEW_Dim_Empresa (V3)
 - Propósito: Lista maestra de clientes.
 - Columnas “Inteligentes”:
     - Nombre_Empresa
@@ -86,14 +86,14 @@ VIEW_Dim_Empresa (V3)
     - Segmento_Valor – Top, Medio, Bajo según facturación.
     - Segmento_Frecuencia – Frecuente, Ocasional, Esporádico.
 
-VIEW_Dim_Concepto (V6)
+replica_VIEW_Dim_Concepto (V6)
 - Propósito: Lista maestra de productos o servicios.
 - Columnas “Inteligientes”:
     - NOMBRE_CONCEPTO
     - Matriz_BCG – Estrella, Vaca Lechera, Dilema o Perro.
     - Perfil_Ciclo_Vida – Activo, En Riesgo, Obsoleto.
 
-VIEW_Dim_Usuario (V7)
+replica_VIEW_Dim_Usuario (V7)
 - Propósito: Lista maestra de empleados.
 - Columnas “Inteligentes”:
     - Nombre_Usuario
@@ -101,7 +101,7 @@ VIEW_Dim_Usuario (V7)
     - Pct_Cumplimiento_Ejecucion
     - Segmento_Cumplimiento_Ejecucion – Cumple / No Cumple Meta.
 
-VIEW_Dim_Ubicacion (V3)
+replica_VIEW_Dim_Ubicacion (V3)
 - Propósito: Lista maestra de ubicaciones de servicio.
 - Columnas “Inteligentes”:
     - Nombre_Ubicacion
@@ -110,7 +110,7 @@ VIEW_Dim_Ubicacion (V3)
 
 4. Tablas de Reglas (La “Estrategia”)
 
-dim_metas_tiempos
+replica_dim_metas_tiempos
 - Propósito: Tabla de reglas y metas estratégicas.
 - Columnas Clave:
     - Nombre_Indicador: Tiempo de Espera, Ejecución o Total.
@@ -122,10 +122,10 @@ dim_metas_tiempos
 Cálculo del Margen Bruto (Rentabilidad)
 - Fórmula: Margen = (SUM(Ingresos) - SUM(Costos)) / SUM(Ingresos)
 - Pasos para la IA:
-    1. Obtener SUM(Ingresos) desde VIEW_Fact_Ingresos[Valor_Facturado].
-    2. Obtener SUM(Costos) desde VIEW_Fact_Costos[Costo_Total_Nomina].
+    1. Obtener SUM(Ingresos) desde replica_VIEW_Fact_Ingresos[Valor_Facturado].
+    2. Obtener SUM(Costos) desde replica_VIEW_Fact_Costos[Costo_Total_Nomina].
     3. Aplicar la fórmula.
-    4. Permitir agrupaciones por Cliente (VIEW_Dim_Empresa), Producto (VIEW_Dim_Concepto), Mes, etc.
+    4. Permitir agrupaciones por Cliente (replica_VIEW_Dim_Empresa), Producto (replica_VIEW_Dim_Concepto), Mes, etc.
 """
 
 # ============================================
@@ -209,7 +209,16 @@ def extraer_detalles_correo(pregunta_usuario: str) -> dict:
     st.info("🧠 El agente de correo está interpretando tu solicitud...")
     contactos = dict(st.secrets.get("named_recipients", {}))
     default_recipient_name = st.secrets.get("email_credentials", {}).get("default_recipient", "")
-    prompt = f"..." # (Omitido por brevedad, es el mismo de autollantas)
+    prompt = f"""
+    Tu tarea es analizar la pregunta de un usuario y extraer los detalles para enviar un correo. Tu output DEBE SER un JSON válido.
+    Agenda de Contactos Disponibles: {', '.join(contactos.keys())}
+    Pregunta del usuario: "{pregunta_usuario}"
+    Instrucciones para extraer:
+    1.  `recipient_name`: Busca un nombre de la "Agenda de Contactos". Si no, usa "default".
+    2.  `subject`: Crea un asunto corto.
+    3.  `body`: Crea un cuerpo de texto breve.
+    JSON Output para la pregunta actual:
+    """
     try:
         response = llm_analista.invoke(prompt).content
         # ... (lógica de parseo de JSON omitida) ...
@@ -235,7 +244,35 @@ def extraer_detalles_correo(pregunta_usuario: str) -> dict:
 
 def enviar_correo_agente(recipient: str, subject: str, body: str, df: Optional[pd.DataFrame] = None):
     # (El código de 'enviar_correo_agente' es idéntico, omitido por brevedad)
-    pass # Tu código de smtplib va aquí
+    with st.spinner(f"📧 Enviando correo a {recipient}..."):
+        try:
+            creds = st.secrets["email_credentials"]
+            sender_email = creds["sender_email"]
+            sender_password = creds["sender_password"]
+            
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = recipient
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+            
+            if df is not None and not df.empty:
+                csv_buffer = io.StringIO()
+                df.to_csv(csv_buffer, index=False)
+                attachment = MIMEApplication(csv_buffer.getvalue(), _subtype='csv')
+                attachment.add_header('Content-Disposition', 'attachment', filename="datos_iana.csv")
+                msg.attach(attachment)
+            
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
+            
+            st.success(f"✅ Correo enviado exitosamente a {recipient}!")
+            return {"texto": f"¡Listo! El correo fue enviado a {recipient}."}
+            
+        except Exception as e:
+            st.error(f"❌ No se pudo enviar el correo. Error: {e}")
+            return {"tipo": "error", "texto": f"Lo siento, no pude enviar el correo. Detalle del error: {e}"}
 
 # ============================================
 # 4) Funciones Auxiliares y Agentes
