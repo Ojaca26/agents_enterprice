@@ -19,8 +19,9 @@ from langchain_community.utilities import SQLDatabase
 import numpy as np
 
 # Micrófono en vivo (frontend) + fallback SR
-from streamlit_mic_recorder import speech_to_text, mic_recorder
-import speech_recognition as sr
+# (Importaciones comentadas para la prueba)
+# from streamlit_mic_recorder import speech_to_text, mic_recorder
+# import speech_recognition as sr
 
 # Agente de Correo
 import smtplib
@@ -70,13 +71,11 @@ def get_llms():
             api_key = st.secrets["google_api_key"]
             common_config = dict(temperature=0.1, google_api_key=api_key)
             
-            # --- ⬇️ INICIO DE LA CORRECCIÓN ⬇️ ---
-            # Cambiamos "gemini-1.5-pro" por "gemini-pro" (el estable)
+            # --- USANDO GEMINI-PRO (EL ESTABLE) ---
             llm_sql = ChatGoogleGenerativeAI(model="gemini-pro", **common_config)
             llm_analista = ChatGoogleGenerativeAI(model="gemini-pro", **common_config)
             llm_orq = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.0, google_api_key=api_key)
             llm_validador = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.0, google_api_key=api_key)
-            # --- ⬆️ FIN DE LA CORRECCIÓN ⬆️ ---
             
             st.success("✅ Agentes de IANA listos.")
             return llm_sql, llm_analista, llm_orq, llm_validador
@@ -104,27 +103,29 @@ def get_sql_agent(_llm, _db):
         st.success("✅ Agente SQL de respaldo configurado.")
         return agent
 
+# Este es el agente LENTO que solo se usa si el rápido falla
 agente_sql_plan_b = get_sql_agent(llm_sql, db)
 
 # ============================================
 # 1.b) Reconocedor de Voz (fallback local)
 # ============================================
-@st.cache_resource
-def get_recognizer():
-    r = sr.Recognizer()
-    r.energy_threshold = 300
-    r.dynamic_energy_threshold = True
-    return r
 
-def transcribir_audio_bytes(data_bytes: bytes, language: str) -> Optional[str]:
-    try:
-        r = get_recognizer()
-        with sr.AudioFile(io.BytesIO(data_bytes)) as source:
-            audio = r.record(source)
-        texto = r.recognize_google(audio, language=language)
-        return texto.strip() if texto else None
-    except Exception:
-        return None
+# @st.cache_resource
+# def get_recognizer():
+#     r = sr.Recognizer()
+#     r.energy_threshold = 300
+#     r.dynamic_energy_threshold = True
+#     return r
+
+# def transcribir_audio_bytes(data_bytes: bytes, language: str) -> Optional[str]:
+#     try:
+#         r = get_recognizer()
+#         with sr.AudioFile(io.BytesIO(data_bytes)) as source:
+#             audio = r.record(source)
+#         texto = r.recognize_google(audio, language=language)
+#         return texto.strip() if texto else None
+#     except Exception:
+#         return None
 
 # ============================================
 # 2) Agente de Correo (Lógica Mejorada)
@@ -680,3 +681,47 @@ for message in st.session_state.messages:
         content = message.get("content", {});
         if isinstance(content, dict):
             if content.get("texto"): st.markdown(content["texto"])
+            if content.get("styled") is not None: st.dataframe(content["styled"])
+            elif isinstance(content.get("df"), pd.DataFrame) and not content["df"].empty:
+                styled_df = style_dataframe(content["df"])
+                st.dataframe(styled_df)
+            if content.get("analisis"): st.markdown(content["analisis"])
+        elif isinstance(content, str): 
+            st.markdown(content)
+
+# --- INICIO DE LA CORRECCIÓN (Simplificado) ---
+
+st.markdown("### 🎤 Escribe tu pregunta")
+
+def procesar_pregunta(prompt):
+    if prompt:
+        if not all([db, llm_sql, llm_analista, llm_orq, agente_sql_plan_b, llm_validador]):
+            st.error("La aplicación no está completamente inicializada. Revisa los errores de conexión o de API key en los 'Secrets' de Streamlit.")
+            return
+
+        st.session_state.messages.append({"role": "user", "content": {"texto": prompt}})
+        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("assistant"):
+            res = orquestador(prompt, st.session_state.messages)
+            st.session_state.messages.append({"role": "assistant", "content": res})
+
+        if res and res.get("tipo") != "error":
+            if res.get("texto"): st.markdown(res["texto"])
+            if res.get("styled") is not None:
+                st.dataframe(res["styled"])
+            elif isinstance(res.get("df"), pd.DataFrame) and not res["df"].empty:
+                st.dataframe(res["df"])
+            if res.get("analisis"):
+                st.markdown("---"); st.markdown("### 🧠 Análisis de IANA"); st.markdown(res["analisis"])
+                st.toast("Análisis generado ✅", icon="✅")
+        elif res:
+            st.error(res.get("texto", "Ocurrió un error inesperado."))
+            st.toast("Hubo un error ❌", icon="❌")
+
+# Reemplazamos el 'input_container' por un 'st.chat_input' simple
+prompt_a_procesar = st.chat_input("... escribe tu pregunta aquí")
+
+if prompt_a_procesar:
+    procesar_pregunta(prompt_a_procesar)
+
+# --- FIN DE LA CORRECCIÓN ---
