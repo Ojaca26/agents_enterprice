@@ -1,0 +1,10 @@
+streamlit
+pandas
+sqlalchemy
+pymysql
+langchain-google-genai
+langchain-community
+langchain-experimental
+numpy
+streamlit-mic-recorder
+SpeechRecognition
