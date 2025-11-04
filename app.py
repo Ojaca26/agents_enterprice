@@ -17,7 +17,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI # Usaremos esta
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.agent_toolkits.sql.base import create_sql_agent
 from langchain_community.utilities import SQLDatabase
-from langchain_experimental.sql import SQLDatabaseChain # Esta es la rápida
+#from langchain_experimental.sql import SQLDatabaseChain # Esta es la rápida
 import numpy as np
 
 # Micrófono en vivo (frontend) + fallback SR
@@ -787,4 +787,5 @@ elif prompt_text:
     prompt_a_procesar = prompt_text
 
 if prompt_a_procesar:
+
     procesar_pregunta(prompt_a_procesar)
